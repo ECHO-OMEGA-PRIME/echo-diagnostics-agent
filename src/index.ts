@@ -56,6 +56,7 @@ interface ScanResult {
   scanned: number;
   findings: DiagFinding[];
   duration_ms: number;
+  error?: string;
 }
 
 // Repos to scan — all Worker repos with src/index.ts
@@ -86,9 +87,9 @@ const WORKER_REPOS = [
 
 // ═══ GITHUB HELPERS ═══
 
-async function githubFetch(env: Env, path: string): Promise<any> {
+async function githubFetch(env: Env, path: string): Promise<{ data: any; status: number; error?: string }> {
   const token = env.GITHUB_TOKEN;
-  if (!token) return null;
+  if (!token) return { data: null, status: 0, error: 'GITHUB_TOKEN not set' };
 
   const resp = await fetch(`${GITHUB_API}${path}`, {
     headers: {
@@ -98,18 +99,33 @@ async function githubFetch(env: Env, path: string): Promise<any> {
     },
   });
 
-  if (!resp.ok) return null;
-  return resp.json();
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    return { data: null, status: resp.status, error: body.slice(0, 200) };
+  }
+  return { data: await resp.json(), status: resp.status };
 }
 
-async function getFileContent(env: Env, repo: string, filePath: string): Promise<string | null> {
-  const data = await githubFetch(env, `/repos/${env.GITHUB_OWNER}/${repo}/contents/${filePath}`);
-  if (!data?.content) return null;
+async function getFileContent(env: Env, repo: string, filePath: string): Promise<{ content: string | null; error?: string }> {
+  const result = await githubFetch(env, `/repos/${env.GITHUB_OWNER}/${repo}/contents/${filePath}`);
+  if (!result.data?.content) return { content: null, error: result.error || `status ${result.status}` };
   try {
-    return atob(data.content.replace(/\n/g, ''));
+    return { content: atob(result.data.content.replace(/\n/g, '')) };
   } catch {
-    return null;
+    return { content: null, error: 'base64 decode failed' };
   }
+}
+
+// Try multiple common file paths for Worker source
+async function findWorkerSource(env: Env, repo: string): Promise<{ content: string | null; file: string; error?: string }> {
+  const paths = ['src/index.ts', 'src/index.js', 'index.ts', 'index.js', 'src/worker.ts', 'worker.ts'];
+  for (const p of paths) {
+    const result = await getFileContent(env, repo, p);
+    if (result.content) return { content: result.content, file: p };
+  }
+  // Return the error from the first attempt for debugging
+  const firstResult = await getFileContent(env, repo, 'src/index.ts');
+  return { content: null, file: 'src/index.ts', error: firstResult.error };
 }
 
 async function pushFix(env: Env, repo: string, filePath: string, content: string, message: string): Promise<boolean> {
@@ -118,7 +134,7 @@ async function pushFix(env: Env, repo: string, filePath: string, content: string
 
   // Get current file SHA
   const existing = await githubFetch(env, `/repos/${env.GITHUB_OWNER}/${repo}/contents/${filePath}`);
-  const sha = existing?.sha;
+  const sha = existing.data?.sha;
 
   const resp = await fetch(`${GITHUB_API}/repos/${env.GITHUB_OWNER}/${repo}/contents/${filePath}`, {
     method: 'PUT',
@@ -314,19 +330,19 @@ async function scanRepo(env: Env, repo: string): Promise<ScanResult> {
   const start = Date.now();
   const findings: DiagFinding[] = [];
 
-  const source = await getFileContent(env, repo, 'src/index.ts');
+  const { content: source, file, error } = await findWorkerSource(env, repo);
   if (!source) {
-    return { repo, scanned: 0, findings: [], duration_ms: Date.now() - start };
+    return { repo, scanned: 0, findings: [], duration_ms: Date.now() - start, error };
   }
 
   // Run all checks
-  findings.push(...checkHealthEndpoint(source, repo, 'src/index.ts'));
-  findings.push(...checkStructuredLogging(source, repo, 'src/index.ts'));
-  findings.push(...checkErrorHandling(source, repo, 'src/index.ts'));
-  findings.push(...checkCorsHeaders(source, repo, 'src/index.ts'));
-  findings.push(...checkVersionTracking(source, repo, 'src/index.ts'));
-  findings.push(...checkRequestValidation(source, repo, 'src/index.ts'));
-  findings.push(...checkTimestamps(source, repo, 'src/index.ts'));
+  findings.push(...checkHealthEndpoint(source, repo, file));
+  findings.push(...checkStructuredLogging(source, repo, file));
+  findings.push(...checkErrorHandling(source, repo, file));
+  findings.push(...checkCorsHeaders(source, repo, file));
+  findings.push(...checkVersionTracking(source, repo, file));
+  findings.push(...checkRequestValidation(source, repo, file));
+  findings.push(...checkTimestamps(source, repo, file));
 
   return { repo, scanned: 1, findings, duration_ms: Date.now() - start };
 }
@@ -408,7 +424,7 @@ async function applyAutoFixes(env: Env, maxFixes = 3): Promise<{ applied: number
   for (const row of (findings.results || [])) {
     const f = row as any;
     try {
-      const source = await getFileContent(env, f.repo, f.file);
+      const { content: source } = await getFileContent(env, f.repo, f.file);
       if (!source) { skipped++; continue; }
 
       let fixed = source;
@@ -693,6 +709,21 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
       return new Response(JSON.stringify({ resolved: body.id }), { headers: CORS_HEADERS });
     }
     return new Response(JSON.stringify({ error: 'id required' }), { status: 400, headers: CORS_HEADERS });
+  }
+
+  // ─── GET /debug ───
+  if (path === '/debug') {
+    const tokenSet = !!env.GITHUB_TOKEN;
+    const tokenLen = env.GITHUB_TOKEN?.length || 0;
+    const owner = env.GITHUB_OWNER;
+    // Test GitHub API
+    const testResult = await githubFetch(env, `/repos/${owner}/echo-analytics-engine`);
+    return new Response(JSON.stringify({
+      tokenSet,
+      tokenLen,
+      owner,
+      githubTest: { status: testResult.status, repoName: testResult.data?.full_name || null, error: testResult.error?.slice(0, 100) },
+    }), { headers: CORS_HEADERS });
   }
 
   // ─── 404 ───
