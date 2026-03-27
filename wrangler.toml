@@ -1,0 +1,32 @@
+name = "echo-diagnostics-agent"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[triggers]
+crons = ["0 */6 * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "echo-diagnostics-agent"
+database_id = "31203fa6-7d6e-48fa-824d-378d76e8ccb2"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "50a42ff9d2d84213834cecb20cf37972"
+
+[vars]
+WORKER_VERSION = "1.0.0"
+GITHUB_OWNER = "ECHO-OMEGA-PRIME"
+
+[[services]]
+binding = "SVC_BRAIN"
+service = "echo-shared-brain"
+
+[[services]]
+binding = "SVC_ENGINE"
+service = "echo-engine-runtime"
+
+[[services]]
+binding = "SVC_BUILDER"
+service = "echo-autonomous-builder"
