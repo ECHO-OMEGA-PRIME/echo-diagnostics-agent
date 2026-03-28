@@ -337,6 +337,9 @@ function checkRootRoute(source: string, repo: string, file: string): DiagFinding
   const hasRootRoute = /app\.get\s*\(\s*['"]\/['"]/.test(source)
     || /path\s*===?\s*['"]\/['"]/.test(source)
     || /pathname\s*===?\s*['"]\/['"]/.test(source)
+    || /\bp\s*===?\s*['"]\/['"]/.test(source)
+    || /\burl\.pathname\s*===?\s*['"]\/['"]/.test(source)
+    || /===?\s*['"]\/['"]/.test(source)
     || /case\s+['"]\/['"]\s*:/.test(source);
 
   const isWorker = /async\s+fetch/.test(source) || /export\s+default/.test(source) || /new\s+Hono/.test(source);
