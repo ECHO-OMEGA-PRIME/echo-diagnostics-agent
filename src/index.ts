@@ -331,6 +331,50 @@ function checkTimestamps(source: string, repo: string, file: string): DiagFindin
   return findings;
 }
 
+function checkRootRoute(source: string, repo: string, file: string): DiagFinding[] {
+  const findings: DiagFinding[] = [];
+
+  const hasRootRoute = /app\.get\s*\(\s*['"]\/['"]/.test(source)
+    || /path\s*===?\s*['"]\/['"]/.test(source)
+    || /pathname\s*===?\s*['"]\/['"]/.test(source)
+    || /case\s+['"]\/['"]\s*:/.test(source);
+
+  const isWorker = /async\s+fetch/.test(source) || /export\s+default/.test(source) || /new\s+Hono/.test(source);
+
+  if (isWorker && !hasRootRoute) {
+    findings.push({
+      repo, file, check: 'missing_root_route',
+      severity: 'low',
+      description: 'No root route handler (/) found. Requests to / will return 404, causing false alerts in monitoring.',
+      suggestion: "Add root route: app.get('/', (c) => c.redirect('/health')) or if (path === '/') return json({...})",
+      canAutoFix: true,
+    });
+  }
+
+  return findings;
+}
+
+function checkConsoleLogging(source: string, repo: string, file: string): DiagFinding[] {
+  const findings: DiagFinding[] = [];
+
+  // Count unstructured console.log calls (not already JSON.stringify)
+  const unstructuredLogs = (source.match(/console\.log\((?!JSON\.stringify)/g) || []).length;
+  const structuredLogs = (source.match(/console\.log\(JSON\.stringify/g) || []).length;
+  const totalLogs = unstructuredLogs + structuredLogs;
+
+  if (unstructuredLogs > 5 && unstructuredLogs > structuredLogs) {
+    findings.push({
+      repo, file, check: 'unstructured_logging',
+      severity: 'low',
+      description: `${unstructuredLogs} unstructured console.log calls vs ${structuredLogs} structured. Logs will be hard to parse in production.`,
+      suggestion: 'Replace console.log(msg) with console.log(JSON.stringify({ ts, level, msg, service }))',
+      canAutoFix: true,
+    });
+  }
+
+  return findings;
+}
+
 // ═══ SCAN ORCHESTRATOR ═══
 
 async function scanRepo(env: Env, repo: string): Promise<ScanResult> {
@@ -350,6 +394,8 @@ async function scanRepo(env: Env, repo: string): Promise<ScanResult> {
   findings.push(...checkVersionTracking(source, repo, file));
   findings.push(...checkRequestValidation(source, repo, file));
   findings.push(...checkTimestamps(source, repo, file));
+  findings.push(...checkRootRoute(source, repo, file));
+  findings.push(...checkConsoleLogging(source, repo, file));
 
   return { repo, scanned: 1, findings, duration_ms: Date.now() - start };
 }
