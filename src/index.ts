@@ -238,7 +238,9 @@ function checkErrorHandling(source: string, repo: string, file: string): DiagFin
 function checkCorsHeaders(source: string, repo: string, file: string): DiagFinding[] {
   const findings: DiagFinding[] = [];
 
-  const hasCors = /Access-Control-Allow-Origin/.test(source);
+  const hasRawCors = /Access-Control-Allow-Origin/.test(source);
+  const hasHonoCors = /from\s+['"]hono\/cors['"]/.test(source) || /cors\(\)/.test(source);
+  const hasCors = hasRawCors || hasHonoCors;
   const hasOptions = /OPTIONS/.test(source);
   const hasFetch = /async\s+fetch/.test(source) || /export\s+default/.test(source);
 
