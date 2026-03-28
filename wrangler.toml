@@ -30,3 +30,7 @@ service = "echo-engine-runtime"
 [[services]]
 binding = "SVC_BUILDER"
 service = "echo-autonomous-builder"
+
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "echo_metrics"
