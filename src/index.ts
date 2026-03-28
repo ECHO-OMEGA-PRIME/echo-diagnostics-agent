@@ -215,7 +215,7 @@ function checkErrorHandling(source: string, repo: string, file: string): DiagFin
       severity: 'high',
       description: `${bareMatches.length} empty catch blocks found — errors are silently swallowed.`,
       suggestion: 'Add error logging inside catch blocks: catch(e) { slog("error", "operation failed", { error: e.message }); }',
-      canAutoFix: false,
+      canAutoFix: true,
     });
   }
 
@@ -270,7 +270,12 @@ function checkCorsHeaders(source: string, repo: string, file: string): DiagFindi
 function checkVersionTracking(source: string, repo: string, file: string): DiagFinding[] {
   const findings: DiagFinding[] = [];
 
-  const hasVersion = /version/i.test(source) && (/WORKER_VERSION/.test(source) || /env\.WORKER_VERSION/.test(source));
+  // Recognize multiple version patterns: env var, hardcoded string in health response, or version constant
+  const hasEnvVersion = /WORKER_VERSION/.test(source) || /env\.WORKER_VERSION/.test(source);
+  const hasHardcodedVersion = /version:\s*['"][0-9]+\.[0-9]+\.[0-9]+['"]/.test(source);
+  const hasVersionConst = /(?:const|let|var)\s+(?:VERSION|WORKER_VERSION|APP_VERSION)\s*=/.test(source);
+  const hasVersion = hasEnvVersion || hasHardcodedVersion || hasVersionConst;
+
   if (!hasVersion) {
     findings.push({
       repo, file, check: 'no_version_tracking',
