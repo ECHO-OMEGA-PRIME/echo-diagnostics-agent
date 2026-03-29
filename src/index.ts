@@ -32,7 +32,7 @@ interface Env {
 const GITHUB_API = 'https://api.github.com';
 const CORS_HEADERS = {
   'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': 'https://echo-ept.com',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, X-Echo-API-Key',
 };
@@ -513,7 +513,7 @@ async function applyAutoFixes(env: Env, maxFixes = 3): Promise<{ applied: number
 // ═══ CORS Headers (injected by diagnostics-agent) ═══
 const corsHeaders = {
   'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': 'https://echo-ept.com',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, X-Echo-API-Key, Authorization',
 };
@@ -639,6 +639,14 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
 
   const url = new URL(request.url);
   const path = url.pathname;
+
+  // Auth check for write endpoints
+  if (request.method === 'POST' || request.method === 'PUT' || request.method === 'DELETE') {
+    const apiKey = request.headers.get('X-Echo-API-Key') || request.headers.get('Authorization')?.replace('Bearer ', '');
+    if (!env.ECHO_API_KEY || apiKey !== env.ECHO_API_KEY) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS_HEADERS });
+    }
+  }
 
   // ─── GET /health ───
   if (path === '/health' || path === '/') {
